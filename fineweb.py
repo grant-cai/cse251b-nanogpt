@@ -3,6 +3,17 @@ import numpy as np
 import tiktoken
 from datasets import load_dataset
 from tqdm import tqdm
+from huggingface_hub import login
+
+# use huggingface token if it exists
+if os.path.isfile("hf_token.txt"):
+    with open("hf_token.txt",'r') as f:
+        try:
+            login(token=f.read())
+            print("HF user token accepted.")
+        except:
+            print("HF Token invalid. Continuing without...")
+
 
 local_dir = "edu_fineweb10B"
 remote_name = "sample-10BT"
