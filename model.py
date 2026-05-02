@@ -64,8 +64,17 @@ class CausalSelfAttention(nn.Module):
         v = self.V(x).view(B, T, self.n_head, head_dim).tranpose(1,2)
 
         alibi = self._alibi_bias(T, x.device)
+        causal_mask = torch.triu(torch.full((T,T),float('inf'),device=x.device),diagonal=1)
+        attn_mask = alibi + causal_mask
 
         # output projection
+        y = torch.nn.functional.scaled_dot_product_attention(
+            q, k, v,
+            attn_mask = attn_mask,
+            dropout = self.dropout if self.training else 0,
+            if_causal = False
+        )
+        y = y.transpose(1,2).contiguous().view(B,T,C)
         y = self.resid_dropout(self.c_proj(y))
         return y
 
