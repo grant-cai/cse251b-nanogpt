@@ -107,7 +107,7 @@ class Block(nn.Module):
 @dataclass
 class GPTConfig:
     block_size: int = 1024
-    vocab_size: int = 50304 # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
+    vocab_size: int = 50257 # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
     n_layer: int = 8
     n_head: int = 10
     n_embd: int = 768
@@ -358,9 +358,20 @@ def load_model(checkpoint_path: str, device: str = "cuda") -> torch.nn.Module:
     model.to(device)
     model.eval()
 
+    # evaluate expects logits = model(input_ids), logits of shape (batch, seq_len, vocab_size)
+    # Need to change GPT.forward() so that it returns full logits as a tensor
+    # This wrapper makes our current outputs work with evaluate.py for now
     class EvalWrapper(nn.Module):
+        '''
+            evaluate expects logits = model(input_ids), logits of shape (batch, seq_len, vocab_size)
+            Need to change GPT.forward() so that it returns full logits as a tensor
+            This wrapper makes our current outputs work with evaluate.py for now
+        '''
         def __init__(self, m): super().__init__(); self.m = m
-        def forward(self, input_ids): return self.m(input_ids)[0]
+        def forward(self, input_ids):
+            dummy_targets = torch.zeros_like(input_ids) # Force GPT.forward() to compute logits for the full sequence
+            logits, _ = self.m(input_ids, dummy_targets) # Logits doesn't use the targets at all, just want the logits
+            return logits[:, :, :50257]
         def parameters(self): return self.m.parameters()
 
     return EvalWrapper(model)
