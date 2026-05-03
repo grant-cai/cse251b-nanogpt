@@ -109,7 +109,7 @@ class GPTConfig:
     block_size: int = 1024
     vocab_size: int = 50304 # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
     n_layer: int = 8
-    n_head: int = 12
+    n_head: int = 10
     n_embd: int = 768
     dropout: float = 0.0
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
@@ -327,3 +327,42 @@ class GPT(nn.Module):
             idx = torch.cat((idx, idx_next), dim=1)
 
         return idx
+    
+def load_model(checkpoint_path: str, device: str = "cuda") -> torch.nn.Module:
+    """
+    Load your trained model from a checkpoint.
+
+    This function is called by evaluate.py. It must return a model where:
+        model(input_ids) -> logits
+        - input_ids: LongTensor of shape (batch, seq_len)
+        - logits: FloatTensor of shape (batch, seq_len, 50257)
+
+    Args:
+        checkpoint_path: Path to your checkpoint.pt file
+        device: Device to load onto ("cuda" or "cpu")
+
+    Returns:
+        model: nn.Module in eval mode
+    """
+    # Load checkpoint
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    model_args = checkpoint['model_args']
+    model = GPT(GPTConfig(**model_args))
+    state_dict = checkpoint['model']
+    unwanted_prefix = '_orig_mod.'
+    for k in list(state_dict.keys()):
+        if k.startswith(unwanted_prefix):
+            state_dict[k[len(unwanted_prefix):]] = state_dict.pop(k)
+    model.load_state_dict(state_dict)
+
+    model.to(device)
+    model.eval()
+
+    class EvalWrapper(nn.Module):
+        def __init__(self, m): super().__init__(); self.m = m
+        def forward(self, input_ids): return self.m(input_ids)[0]
+        def parameters(self): return self.m.parameters()
+
+    return EvalWrapper(model)
+    
+

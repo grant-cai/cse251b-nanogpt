@@ -287,6 +287,9 @@ while True:
     if iter_num == 0 and eval_only:
         break
 
+    if losses['val'] - best_val_loss > 1e-2:
+        break
+
     # forward backward update, with optional gradient accumulation to simulate larger batch size
     # and using the GradScaler if data type is float16
     for micro_step in range(gradient_accumulation_steps):
