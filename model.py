@@ -32,10 +32,13 @@ class CausalSelfAttention(nn.Module):
         super().__init__()
         assert config.n_embd % config.n_head == 0
         # key, query, value projections for all heads, but in a batch
+        self.n_kv_heads = config.n_kv_heads
+        kv_dim = (config.n_embd // config.n_head) * config.n_kv_heads
+
         self.Q = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
-        self.K = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
-        self.V = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
-        # output projection
+        self.K = nn.Linear(config.n_embd, kv_dim, bias=config.bias)
+        self.V = nn.Linear(config.n_embd, kv_dim, bias=config.bias)
+
         self.c_proj = nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
         # regularization
         self.attn_dropout = nn.Dropout(config.dropout)
@@ -59,9 +62,13 @@ class CausalSelfAttention(nn.Module):
         head_dim = C // self.n_head
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
-        q = self.Q(x).view(B, T, self.n_head, head_dim).transpose(1,2)
-        k = self.K(x).view(B, T, self.n_head, head_dim).transpose(1,2)
-        v = self.V(x).view(B, T, self.n_head, head_dim).transpose(1,2)
+        q = self.Q(x).view(B, T, self.n_head, head_dim).transpose(1, 2)
+        k = self.K(x).view(B, T, self.n_kv_heads, head_dim).transpose(1,2)
+        v = self.V(x).view(B, T, self.n_kv_heads, head_dim).transpose(1,2)
+
+        # repeat K and V to match number of Q heads
+        k = k.repeat_interleave(self.n_head // self.n_kv_heads, dim=1)
+        v = v.repeat_interleave(self.n_head // self.n_kv_heads, dim=1)
 
         alibi = self._alibi_bias(T, x.device)
         causal_mask = torch.triu(torch.full((T,T),float('-inf'),device=x.device),diagonal=1)
@@ -112,6 +119,7 @@ class GPTConfig:
     n_head: int = 10
     n_embd: int = 768
     dropout: float = 0.0
+    n_kv_heads: int = 4  # number of KV heads, must divide n_head
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
 
 class GPT(nn.Module):
