@@ -1,5 +1,6 @@
 import torch
 
+@torch.compile
 def newtonschulz(G, steps=5):
     """Newton-Schulz iteration to orthogonalize G."""
     assert G.ndim >= 2

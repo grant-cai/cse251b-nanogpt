@@ -26,6 +26,7 @@ import numpy as np
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed import init_process_group, destroy_process_group
+import random
 
 from model import GPTConfig, GPT
 
@@ -65,7 +66,7 @@ grad_clip = 1.0 # clip gradients at this value, or disable if == 0.0
 # learning rate decay settings
 decay_lr = True # whether to decay the learning rate
 warmup_iters = 2000 # how many steps to warm up for
-lr_decay_iters = 600000 # should be ~= max_iters per Chinchilla
+lr_decay_iters = max_iters # should be ~= max_iters per Chinchilla
 min_lr = 6e-5 # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
 # DDP settings
 backend = 'nccl' # 'nccl', 'gloo', etc.
@@ -114,11 +115,19 @@ ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=
 
 # poor man's data loader
 data_dir = os.path.join(dataset)
-train_data = np.load(os.path.join(data_dir, 'edufineweb_train_000001.npy'))
+train_shards = sorted([
+    os.path.join(data_dir, f) for f in os.listdir(data_dir)
+    if f.startswith('edufineweb_train') and f.endswith('.npy')
+])
 val_data = np.load(os.path.join(data_dir, 'edufineweb_val_000000.npy'))
+train_data = np.load(random.choice(train_shards))
 
 def get_batch(split):
-    data = train_data if split == 'train' else val_data
+    global train_data
+    if split == 'train':
+        data = train_data
+    else:
+        data = val_data
     ix = torch.randint(len(data) - block_size, (batch_size,))
     x = torch.stack([torch.from_numpy((data[i:i+block_size]).astype(np.int64)) for i in ix])
     y = torch.stack([torch.from_numpy((data[i+1:i+1+block_size]).astype(np.int64)) for i in ix])
@@ -328,6 +337,11 @@ while True:
             mfu = raw_model.estimate_mfu(batch_size * gradient_accumulation_steps, dt)
             running_mfu = mfu if running_mfu == -1.0 else 0.9*running_mfu + 0.1*mfu
         print(f"iter {iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms, mfu {running_mfu*100:.2f}%")
+        # rotate shard every 1000 iters
+    if iter_num % 1000 == 0:
+        new_shard = random.choice(train_shards)
+        train_data = np.load(new_shard)
+        print(f"loaded new shard: {new_shard}")
     iter_num += 1
     local_iter_num += 1
 
