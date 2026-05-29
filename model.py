@@ -57,6 +57,7 @@ class CausalSelfAttention(nn.Module):
         distances = i - j
         return self.slopes * distances
 
+    # AliBi forward pass
     def forward(self, x):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
         head_dim = C // self.n_head
@@ -116,7 +117,7 @@ class GPTConfig:
     block_size: int = 1024
     vocab_size: int = 50257 # GPT-2 vocab_size of 50257, padded up to nearest multiple of 64 for efficiency
     n_layer: int = 9
-    n_head: int = 10
+    n_head: int = 12
     n_embd: int = 768
     dropout: float = 0.0
     n_kv_heads: int = 4  # number of KV heads, must divide n_head
