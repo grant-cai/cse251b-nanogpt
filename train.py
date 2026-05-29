@@ -21,6 +21,9 @@ import time
 import math
 import pickle
 from contextlib import nullcontext
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 import numpy as np
 import torch
@@ -125,8 +128,10 @@ commonpile_shards = sorted([
 ]) if os.path.exists('common_pile_filtered') else []
 
 train_shards = fineweb_shards*3 + commonpile_shards
+random.shuffle(train_shards)
 val_data = np.load(os.path.join(data_dir, 'edufineweb_val_000000.npy'))
-train_data = np.load(random.choice(train_shards))
+shard_idx = 0
+train_data = np.load(train_shards[0])
 
 def get_batch(split):
     global train_data
@@ -265,6 +270,10 @@ t0 = time.time()
 local_iter_num = 0 # number of iterations in the lifetime of this process
 raw_model = model.module if ddp else model # unwrap DDP container if needed
 running_mfu = -1.0
+iter_history = []
+train_loss_history = []
+val_loss_history = []
+
 while True:
 
     # determine and set the learning rate for this iteration
@@ -276,6 +285,9 @@ while True:
     if iter_num % eval_interval == 0 and master_process:
         losses = estimate_loss()
         print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+        iter_history.append(iter_num)
+        train_loss_history.append(losses['train'].item() if hasattr(losses['train'], 'item') else losses['train'])
+        val_loss_history.append(losses['val'].item() if hasattr(losses['val'], 'item') else losses['val'])
         if wandb_log:
             wandb.log({
                 "iter": iter_num,
@@ -344,16 +356,30 @@ while True:
             running_mfu = mfu if running_mfu == -1.0 else 0.9*running_mfu + 0.1*mfu
         print(f"iter {iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms, mfu {running_mfu*100:.2f}%")
         # rotate shard every 1000 iters
-    if iter_num % 1000 == 0:
-        new_shard = random.choice(train_shards)
+    if iter_num % 200 == 0 and iter_num > 0:
+        new_shard = train_shards[shard_idx % len(train_shards)]
         train_data = np.load(new_shard)
         print(f"loaded new shard: {new_shard}")
+        shard_idx += 1
     iter_num += 1
     local_iter_num += 1
 
     # termination conditions
     if iter_num > max_iters:
         break
+
+if master_process and len(iter_history) > 0:
+    plt.figure(figsize=(8, 5))
+    plt.plot(iter_history, train_loss_history, label='train loss')
+    plt.plot(iter_history, val_loss_history, label='val loss')
+    plt.xlabel('iteration')
+    plt.ylabel('loss')
+    plt.title('Training and Validation Loss')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    out_path = os.path.join(out_dir, 'loss_curve.png')
+    plt.savefig(out_path, dpi=150, bbox_inches='tight')
+    print(f"saved loss curve to {out_path}")
 
 if ddp:
     destroy_process_group()
